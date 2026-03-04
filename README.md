@@ -4,7 +4,7 @@ This repository contains data and code for the manuscript titled "Food availabil
 Emily J. Williams, Theo K. Michaels, and W. Alice Boyle
 
 
-All data for this study was analyzed using R software using code included in file: WilliamsEtAl_04Dec2025.Rmd
+All data for this study was analyzed using R software using code included in analysis files. Code is executable using WilliamsEtAl_04Dec2025.Rmd and the html version includes all code and output of analyses. 
 
 Associated data files in .CSV format: 
 	# "EdibleMassData2014_raw.csv"
