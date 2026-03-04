@@ -1,0 +1,575 @@
+---
+title: "WilliamEtAl_Dec2025_GRSPfood"
+author: "Emily Williams, Theo Michaels, Alice Boyle"
+date: "04 December 2025"
+output: html_document
+toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Datasets are used for this analysis:
+
+- "EdibleMassData2014_raw.csv"
+- "GRSP_Food_Manuscript_Final_Dec2025.csv"
+- "GRSP_DispersalData_withBFE_April2025.csv"
+
+
+```{r load libraries, include = FALSE}
+
+# Evaluating models, transformations if needed
+library(effects)        # For extracting model predictions and confidence intervals for plotting
+library(AICcmodavg)     # For evaluating AIC scores for models
+library(ggResidpanel)   # Used for evaluating model assumptions
+library(lattice)
+
+# Analysis 
+library(car)            # Used with other packages, also Anova()
+library(lme4)           # Used for linear and mixed effects models
+library(lmerTest)       # Used for anova(), different than Anova()
+library(performance)    # Used to obtain r-squared, conditional r-squared, etc. 
+library(marginaleffects)# Obtain partial effects
+
+# Specific to graphing
+library(ggplot2)
+library(gridExtra)
+library(sjPlot)
+library(interactions)
+library(cowplot)
+library(svglite)
+library(patchwork)
+
+# Other needed packages  
+library(anytime)         # For making date objects, but see lubridate package below
+library(naniar)          # For replacing values with NA
+library(lubridate)       # For assigning dates to numerical values, etc. 
+library(tidyr)
+library(dplyr)
+
+```
+
+
+# PREDICTION I ANALYSIS
+Prediction I: Food abundance would vary temporally over single breeding seasons, and spatially in response to the individual and interactive disturbances of burning and grazing. 
+
+```{r Prediction I analysis, include = TRUE}
+##########################################################
+######################### STEP 1 #########################
+##########################################################
+
+# BRING IN DATA  ------------------------
+df_Food_og <- read.csv("EdibleMassData2014_raw.csv")
+
+# ASSIGN VARIABLES STRUCTURE AS NEEDED ------------------------
+df_Food_og$YrsSinceBurn <- as.factor(df_Food_og$YrsSinceBurn)
+df_Food_og$GrazingTreatment <- as.factor(df_Food_og$GrazingTreatment)
+df_Food_og$Watershed <- as.factor(df_Food_og$Watershed)
+df_Food_og$TimePeriod <- as.factor(df_Food_og$TimePeriod)
+
+# Fix zLate to Late
+levels(df_Food_og$TimePeriod)[levels(df_Food_og$TimePeriod) == "zLate"]<-"Late"
+
+# SUMMARIZE TRANSECTS SECTIONS ------------------------
+
+df_Food<-df_Food_og %>%
+  group_by(Watershed, TransectID, TimePeriod, BurnTreatment, GrazingTreatment, YrsSinceBurn) %>%
+   summarize(EdibleMass = sum(EdibleMass)) %>%
+  as.data.frame()
+
+# TRANSFORMATIONS ------------------------
+
+df_Food$EdibleMass_trans<-(log(df_Food$EdibleMass))
+
+
+##########################################################
+######################### STEP 2 #########################
+##########################################################
+
+# SUMMARY OF EDIABLE BIOMASS BY TIME PERIOD ------------------------
+df_EBbyTP_SummaryStats<- df_Food %>%
+group_by(TimePeriod) %>%
+    summarise(
+    EB_mean = mean(EdibleMass, na.rm = TRUE)
+  )
+
+##########################################################
+######################### STEP 3 #########################
+##########################################################
+
+# MODELS FOR PREDICTION 1 ------------------------
+
+# Mod_01: additive ------------------------
+mod_Food_01 <- lmer(EdibleMass_trans ~ TimePeriod + GrazingTreatment + YrsSinceBurn + (1|Watershed) + (1|Watershed:TransectID), data = df_Food, REML=FALSE)
+summary(mod_Food_01)
+
+# Mod_02: interactions  ------------------------
+mod_Food_02 <- lmer(EdibleMass_trans ~ TimePeriod + GrazingTreatment + YrsSinceBurn + TimePeriod*GrazingTreatment + TimePeriod*YrsSinceBurn + (1|Watershed) + (1|Watershed:TransectID), data = df_Food, REML=FALSE)
+summary(mod_Food_02)
+
+### AIC COMPARISON ------------------------
+prediction_i_R_models <- list(mod_Food_01, mod_Food_02)
+prediction_i_R_names <- c("by_TP_GT_YB", "by_TP_GT_YB_TPGT_TPYB")
+aictab(cand.set = prediction_i_R_models, modnames = prediction_i_R_names)
+
+### R square results ------------------------
+r2_nakagawa(mod_Food_02)
+
+
+```
+
+
+# PREDICTION I FIGURE
+
+```{r Prediction I figure, echo = FALSE}
+
+# GRAPHING ------------------------
+
+# timeperiod*Yearsince burn
+plot_time_YearSinceBurn<-cat_plot(mod_Food_02, pred = TimePeriod, modx = YrsSinceBurn, 
+                                  pred.point.size = 5, geom = "line", errorbar.width = 0.2, 
+                                  x.label = "Time Period",
+                                  y.label = "ln Edible Mass (g/150m  )", 
+                                  colors = c("#e32636", "#ff8c00", "#f0dc82"), legend.main = "Years Since Burn")
+
+
+
+plot_time_YearSinceBurn02<-plot_time_YearSinceBurn +
+  ylim(-1, 3.15)+
+  theme(axis.text.x = element_text(colour = "black", size = 11, face = "plain", family = "arial"), 
+        axis.text.y = element_text(colour = "black", size = 11, face = "plain", family = "arial"),
+        legend.text = element_text(colour = "black", size = 11, face = "plain", family = "arial"),
+        axis.title.x = element_text(colour = "black", size=12, face = "plain", family = "arial"),
+        axis.title.y = element_text(colour = "black", size=12, face = "plain", family = "arial"),
+        legend.title = element_text(colour = "black", size = 12, face = "plain", family = "arial")
+        )
+
+
+# timeperiod*Grazing
+plot_time_Grazing<-cat_plot(mod_Food_02, pred = TimePeriod, modx = GrazingTreatment, 
+                            pred.point.size = 5, geom = "line", errorbar.width = 0.2, 
+                            x.label = "Time Period", 
+                            y.label = "ln Edible Mass (g/150m  )", 
+                            colors = c("#8b4513", "#000000", "#228b22"), legend.main = "Grazing Treatment")
+
+plot_time_Grazing02<-plot_time_Grazing +
+  ylim(-1, 3.15)+
+  theme(axis.text.x = element_text(colour = "black", size = 11, face = "plain", family = "arial"), 
+        axis.text.y = element_text(colour = "black", size = 11, face = "plain", family = "arial"),
+        legend.text = element_text(colour = "black", size = 11, face = "plain", family = "arial"),
+        axis.title.x = element_text(colour = "black", size=12, face = "plain", family = "arial"),
+        axis.title.y = element_text(colour = "black", size=12, face = "plain", family = "arial"),
+        legend.title = element_text(colour = "black", size = 12, face = "plain", family = "arial")
+        )
+
+plot_time_YearSinceBurn02
+plot_time_Grazing02
+
+
+
+```
+
+
+# Bring in data and set up dataframe to use for predictions ii-iv.
+
+
+```{r Bring in data for prediction ii-iv, include=TRUE}
+
+# BRING IN DATA  ------------------------
+df_GRSP_Food <- read.csv("GRSP_Food_Manuscript_Final_Dec2025.csv")
+
+# ADD IN NAs  ------------------------
+
+is.na(df_GRSP_Food) <- df_GRSP_Food == -999
+is.na(df_GRSP_Food) <- df_GRSP_Food == -9
+
+# ASSIGN VARIABLES STRUCTURE AS NEEDED ------------------------
+df_GRSP_Food$PlotName<-as.factor(df_GRSP_Food$PlotName)
+df_GRSP_Food$Recap<-as.factor(df_GRSP_Food$Recap)
+df_GRSP_Food$Age<-as.factor(df_GRSP_Food$Age)
+df_GRSP_Food$Sex<-as.factor(df_GRSP_Food$Sex)
+df_GRSP_Food$BurnTreatment<-as.factor(df_GRSP_Food$BurnTreatment)
+df_GRSP_Food$GrazingTreatment<-as.factor(df_GRSP_Food$GrazingTreatment)
+df_GRSP_Food$CaptureYear<-as.factor(df_GRSP_Food$CaptureYear)
+df_GRSP_Food$yearSinceBurn<-as.factor(df_GRSP_Food$yearSinceBurn)
+
+df_GRSP_Food$FatScoreOrd<-as.factor(df_GRSP_Food$FatScore)
+df_GRSP_Food$timeperiod<-factor(df_GRSP_Food$timeperiod, levels = c("Early", "Mid", "Late"))
+
+# SURVEY DATE AS A DATE ------------------------
+df_GRSP_Food$CaptureDate <- as.Date(df_GRSP_Food$CaptureDate)
+
+# CAPTURE TIME  ------------------------
+df_GRSP_Food$CaptureTimeCST <- as.POSIXct(df_GRSP_Food$CaptureTime, tz = "America/Chicago", format = "%H:%M")
+#str(df_GRSP_Food)
+
+
+# PLOT TYPE ------------------------
+# Some plots are not relevant for predictions ii-iV need to be removed.
+
+df_GRSP_Food<-subset(df_GRSP_Food, df_GRSP_Food$PlotName !="4A" & df_GRSP_Food$PlotName !="N20A" & 
+                       df_GRSP_Food$PlotName !="BFE" & df_GRSP_Food$PlotName !="NT")
+
+
+```
+
+
+# PREDICTION II ANALYSIS
+Prediction II: Fueling rates, would be positively associated with the spatial and temporal abundance of prey on the landscape.
+
+```{r Prediction II analysis, include=TRUE}
+##########################################################
+######################### STEP 1 #########################
+##########################################################
+
+# SUBSET DATA AS NEEDED  ------------------------
+# Subset data for 2014, TRIG = FALSE, adults only
+df_GRSP_Food_2014<-df_GRSP_Food[df_GRSP_Food$CaptureYear=="2014",]
+df_GRSP_Food_2014<-df_GRSP_Food_2014[df_GRSP_Food_2014$TRIG.issues == "FALSE",]
+df_GRSP_Food_2014<-df_GRSP_Food_2014[df_GRSP_Food_2014$Age !="HY",]
+
+# CLEAN DATASET AND TRANSFORMATIONS ------------------------
+
+# Dropping outliers and passing back to the dataframe
+df_GRSP_Food_2014_02<-df_GRSP_Food_2014[-c(143,39),]
+
+# Incorporate transformation 
+df_GRSP_Food_2014_02$ConcTRIG_trans<-(log(df_GRSP_Food_2014_02$ConcTRIG))
+df_GRSP_Food_2014_02$MeanEdibleMass_trans<-(log(df_GRSP_Food_2014_02$MeanEdibleMass))
+
+##########################################################
+######################### STEP 2  ########################
+##########################################################
+# Here we are going to look at edible biomass as a predictor of TRIG 
+
+# Mod_01: punitive model  ------------------------
+mod_TRIGfood_01 <- lm(ConcTRIG_trans~ CaptureTimeCST + CaptureDate + FatScoreOrd + Sex, data = df_GRSP_Food_2014_02)
+summary(mod_TRIGfood_01)
+
+# Mod_02: with food ------------------------
+mod_TRIGfood_02 <- lm(ConcTRIG_trans~ MeanEdibleMass_trans + CaptureTimeCST + CaptureDate + FatScoreOrd + Sex, 
+                      data = df_GRSP_Food_2014_02)
+summary(mod_TRIGfood_02)
+
+```
+
+
+# PREDICTION II FIGURE
+
+```{r Prediction II Figure, echo = FALSE}
+
+# GRAPHING STEP 1: MODEL  ------------------------
+# Same as above but redoing to rename, etc.
+mod_TRIGfood_NoFood <- lm(ConcTRIG_trans~CaptureTimeCST + CaptureDate + FatScoreOrd + Sex, 
+                      data = df_GRSP_Food_2014_02)
+
+df_TRIGfood_GRAPH_residuals<-data.frame(mod_TRIGfood_NoFood$residuals)
+
+# Rename the column and then merge dataframes based on row number
+names(df_TRIGfood_GRAPH_residuals)[1] <- "residuals"
+df_TRIGfood_GRAPH_residuals_02<-merge(df_GRSP_Food_2014_02, df_TRIGfood_GRAPH_residuals, by = 0)
+
+
+# GRAPHING STEP 2 ------------------------
+# Warning produced is just NA data. 
+
+plot_prediction_ii_Resid_01<-ggplot(df_TRIGfood_GRAPH_residuals_02, aes(x = MeanEdibleMass_trans, y = residuals))+
+  geom_point(color = "black") + 
+  labs(x = "ln Edible Mass (g/150m  )",
+       y = "Residual TRIG")+
+  ylim(-1.1, 1)+
+  xlim(-0.6, 3.25)+
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "black", size = 11, face = "plain"),
+        axis.text.y = element_text(colour = "black", size = 11, face = "plain"),
+        axis.title.x = element_text(colour = "black", size=12, face = "plain"),
+        axis.title.y = element_text(colour = "black", size=12, face = "plain"),
+        )
+
+plot_prediction_ii_Resid_01
+
+```
+
+
+# PREDICTION III ANALYSIS
+Prediction III: Territory densities would be positively associated with fueling rates
+
+```{r Prediction III Analysis, include=TRUE}
+##########################################################
+######################### STEP 1 #########################
+##########################################################
+
+# SUBSET DATA AS NEEDED  ------------------------
+# Subset data for just males, adults only, TRIG
+
+df_GRSP_Food_Males<-df_GRSP_Food[df_GRSP_Food$Sex=="M",]
+df_GRSP_Food_Males<-df_GRSP_Food_Males[df_GRSP_Food_Males$Age !="HY",]
+df_GRSP_Food_Males<-df_GRSP_Food_Males[df_GRSP_Food_Males$TRIG.issues == "FALSE",]
+
+##########################################################
+######################### STEP 2a ########################
+##########################################################
+# Determining model for residual TRIG 
+
+# CLEAN DATASET AND TRANSFORM VARIABLES AS NEEDED ------------------------
+
+# Incorporate transformation 
+df_GRSP_Food_Males$ConcTRIG_trans<-(log(df_GRSP_Food_Males$ConcTRIG))
+
+# MODELS FOR DETERIMING RESIDUAL TRIG  ------------------------
+
+# Mod_01_resid: with Fat Score ------------------------
+mod_TRIGresidMales_01<-lm(ConcTRIG_trans~CaptureTimeCST + CaptureYear + FatScoreOrd, data = df_GRSP_Food_Males)
+summary(mod_TRIGresidMales_01)
+
+# Mod_02_resid: without Fat Score ------------------------
+mod_TRIGresidMales_02<-lm(ConcTRIG_trans~CaptureTimeCST + CaptureYear, data = df_GRSP_Food_Males)
+summary(mod_TRIGresidMales_02)
+
+##########################################################
+######################### STEP 2b ########################
+##########################################################
+
+### EXTRACT RESIDUALS ------------------------
+# Extracting residuals from best fit model: mod_TRIGcovarMales_02
+mod_TRIGresidMales_02_Nas<-lm(ConcTRIG_trans~CaptureTimeCST + CaptureYear, data = df_GRSP_Food_Males, na.action = na.exclude)
+df_MaleResid02_Nas<-data.frame(resid(mod_TRIGresidMales_02_Nas))
+
+# Rename the column and then merge dataframes based on row number
+names(df_MaleResid02_Nas)[1] <- "MaleResid_mod02"
+df_GRSP_Food_Males_resid02<-merge(df_GRSP_Food_Males, df_MaleResid02_Nas, by = 0)
+
+# Rename for ease ------------------------
+df_GRSP_Food_Males_resids<-df_GRSP_Food_Males_resid02
+
+##########################################################
+######################### STEP 3a ########################
+##########################################################
+
+# SUMMARIZE  ------------------------
+# Summarize so that there is one residual values and time period per density measure. 
+df_GRSP_Food_Males_resids_sub<-select(df_GRSP_Food_Males_resids, c(2:10, 17, 20, 25))
+df_GRSP_Food_Males_resids_02<-df_GRSP_Food_Males_resids_sub[complete.cases(df_GRSP_Food_Males_resids_sub), ]
+
+df_GRSP_Food_Males_resids_03 <- df_GRSP_Food_Males_resids_02 %>%
+  group_by(PlotName, timeperiod) %>%
+   summarize(MeanDensity = mean(MeanDensity),
+             MeanMaleResid_mod02 = mean(MaleResid_mod02))
+
+# TRANSFORM VARIABLES AS NEEDED  ------------------------
+
+# Incorporate transformation 
+df_GRSP_Food_Males_resids_03$MeanDensity_trans<-(sqrt(df_GRSP_Food_Males_resids_03$MeanDensity))
+
+##########################################################
+######################### STEP 3b ########################
+##########################################################
+
+#### MODELS FOR PREDICTION III  ------------------------
+
+# Model 01: no covariates  ------------------------
+mod_TRIG_MalesDensity_01 <- lm(MeanDensity ~ MeanMaleResid_mod02, data = df_GRSP_Food_Males_resids_03)
+summary(mod_TRIG_MalesDensity_01) 
+
+# Model 02: with time  ------------------------
+mod_TRIG_MalesDensity_02 <- lm(MeanDensity ~ MeanMaleResid_mod02 + timeperiod, data = df_GRSP_Food_Males_resids_03)
+summary(mod_TRIG_MalesDensity_02)
+
+# Model 03: with interaction  ------------------------
+mod_TRIG_MalesDensity_03 <- lm(MeanDensity ~ MeanMaleResid_mod02 + timeperiod + MeanMaleResid_mod02*timeperiod, 
+                               data = df_GRSP_Food_Males_resids_03)
+summary(mod_TRIG_MalesDensity_03)
+
+### AIC COMPARISON ------------------------
+# Define list of models for AIC comparison, vector with names
+# Then calculate AIC for each model
+prediction_iii_models <- list(mod_TRIG_MalesDensity_01, mod_TRIG_MalesDensity_02, mod_TRIG_MalesDensity_03)
+prediction_iii_names <- c("by_TRIG", "by_TRIG_TP", "by_TRIG_TP_INTERACTION")
+aictab(cand.set = prediction_iii_models, modnames = prediction_iii_names)
+
+
+### ADDITIONAL BEST MODEL FINDINGS ------------------------
+# Model 1, summary above
+AIC(mod_TRIG_MalesDensity_01)
+logLik(mod_TRIG_MalesDensity_01)
+df.residual(mod_TRIG_MalesDensity_01) # But also in summary output
+deviance(mod_TRIG_MalesDensity_01)
+
+```
+
+
+# PREDICTION III FIGURE
+
+```{r Prediction III Figure, echo = FALSE}
+
+# GRAPHING ------------------------
+# Using mod_TRIG_MalesDensity_01
+
+plot_prediction_iii_01<-ggplot(df_GRSP_Food_Males_resids_03, aes(x = MeanMaleResid_mod02, y = MeanDensity))+
+  geom_point(color = "black") + 
+  ylim(0,11.5)+
+  xlim(-0.50,0.60)+
+  labs(x = "Residual TRIG (mmol/l)",
+       y = "Density (territorial males/10-ha)")+
+ theme_classic() +
+ theme(axis.text.x = element_text(colour = "black", size = 11, face = "plain"), 
+        axis.text.y = element_text(colour = "black", size = 11, face = "plain"),
+        axis.title.x = element_text(colour = "black", size=12, face = "plain"),
+        axis.title.y = element_text(colour = "black", size=12, face = "plain"),
+        )
+
+plot_prediction_iii_01
+
+
+```
+
+
+# PREDICTION IV ANALYSIS
+Prediction IV: Territory densities would be positively associated with the abundance of potential prey. 
+
+```{r Prediction IV analysis, include=TRUE}
+##########################################################
+######################### STEP 1 #########################
+##########################################################
+
+# SUBSET DATA AS NEEDED  ------------------------
+# Just adult males, using df_GRSP_Food_Males from above.
+df_GRSP_Food_Males_2014<-df_GRSP_Food_Males[df_GRSP_Food_Males$CaptureYear=="2014",]
+
+# SUMMARIZE  ------------------------
+# Summarize so that there is one ediable biomass values and time period per density measure. 
+df_GRSP_Food_Males_2014_02<-select(df_GRSP_Food_Males_2014, c(1:7, 16, 19:20))
+df_GRSP_Food_Males_2014_03<-df_GRSP_Food_Males_2014_02[complete.cases(df_GRSP_Food_Males_2014_02), ]
+
+df_GRSP_Food_Males_2014_04 <- df_GRSP_Food_Males_2014_03 %>%
+  group_by(PlotName, timeperiod) %>%
+   summarize(MeanDensity = mean(MeanDensity),
+             MeanEdibleMass = mean(MeanEdibleMass))
+       
+# TRANSFORMING VARIABLES AS NEEDED ------------------------
+
+# Incorporate transformation. 
+df_GRSP_Food_Males_2014_04$MeanEdibleMass_trans<-(log(df_GRSP_Food_Males_2014_04$MeanEdibleMass))
+
+
+##########################################################
+######################### STEP 2 #########################
+##########################################################
+
+# Mod_01: no covariates ------------------------
+mod_denseFood_01 <- lm(MeanDensity ~ MeanEdibleMass_trans, data = df_GRSP_Food_Males_2014_04)
+summary(mod_denseFood_01)
+
+# Mod_02 with time ------------------------
+mod_denseFood_02 <- lm(MeanDensity ~ MeanEdibleMass_trans + timeperiod, data = df_GRSP_Food_Males_2014_04)
+summary(mod_denseFood_02)
+
+# Mod_03 with interactions ------------------------
+mod_denseFood_03 <- lm(MeanDensity ~ MeanEdibleMass_trans + timeperiod + MeanEdibleMass_trans*timeperiod, data = df_GRSP_Food_Males_2014_04)
+summary(mod_denseFood_03)
+
+### AIC COMPARISON ------------------------
+# Define list of models for AIC comparison, vector with names
+# Then calculate AIC for each model
+# Best model is mod_denseFood_01 - just ediable biomass. 
+prediction_iv_models<- list(mod_denseFood_01, mod_denseFood_02, mod_denseFood_03)
+prediction_iv_names<- c("by_EdBio", "by_EdBio_TP", "by_EdBio_TP_EdBioTP")
+aictab(cand.set = prediction_iv_models, modnames = prediction_iv_names)
+
+### ADDITIONAL BEST MODEL FINDINGS ------------------------
+# Model 1, summary above
+AIC(mod_denseFood_01)
+logLik(mod_denseFood_01)
+df.residual(mod_denseFood_01)
+deviance(mod_denseFood_01)
+
+```
+
+
+# PREDICTION IV FIGURE
+
+```{r Prediction IV Figure, echo = FALSE}
+
+# GRAPHING ------------------------
+
+plot_prediction_iv_01<-ggplot(df_GRSP_Food_Males_2014_04, aes(x = MeanEdibleMass_trans, y = MeanDensity))+
+  geom_point(color = "black") + 
+  ylim(0,9.75)+
+  xlim(-0.5,3.5)+
+  labs(x = "ln Edible Mass (g/150m  )",
+       y = "Density (territorial males/10-ha)")+
+ theme_classic() +
+ theme(axis.text.x = element_text(colour = "black", size = 11, face = "plain"), 
+        axis.text.y = element_text(colour = "black", size = 11, face = "plain"),
+        axis.title.x = element_text(colour = "black", size=12, face = "plain"),
+        axis.title.y = element_text(colour = "black", size=12, face = "plain")
+        )
+
+plot_prediction_iv_01
+
+```
+
+
+# PREDICTION V ANALYSIS
+Prediction V: Fueling rates would increase from first to second territories to a greater extent in dispersers than in site-faithful individuals.
+
+
+```{r Prediction V analysis, include=TRUE}
+##########################################################
+######################### STEP 1 #########################
+##########################################################
+
+# BRING IN DATA  ------------------------
+df_GRSP_Dispersal <- read.csv("GRSP_DispersalData_withBFE_April2025.csv")
+
+# ASSIGN VARIABLES STRUCTURE AS NEEDED ------------------------
+df_GRSP_Dispersal$ColorBand<-as.factor(df_GRSP_Dispersal$ColorBand)
+df_GRSP_Dispersal$DispersalStatus<-as.factor(df_GRSP_Dispersal$DispersalStatus)
+df_GRSP_Dispersal$Year<-as.factor(df_GRSP_Dispersal$Year)
+
+# TRANSFORMING VARIABLES AS NEEDED ------------------------
+# None needed. 
+
+
+##########################################################
+######################### STEP 2 #########################
+##########################################################
+
+# T-TestWITH Diff_ResidTRIG ------------------------
+# One sided asking if disperses have greater ResidTRIG than the non-disperses
+mod_Diff_ResidTRIG_01<-t.test(Diff_ResidTRIG~DispersalStatus, data = df_GRSP_Dispersal, var.equal = TRUE, alternative = "greater")
+mod_Diff_ResidTRIG_01
+
+```
+
+
+# PREDICTION V FIGURE
+
+```{r Prediction V Figure, echo = FALSE}
+
+
+# GRAPHING ------------------------
+
+plot_prediction_v_01<- ggplot(df_GRSP_Dispersal, aes(x=DispersalStatus, y=Diff_ResidTRIG, fill=DispersalStatus)) +
+  geom_hline(yintercept = 0, colour = "darkgray", linetype = "longdash")+  
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(color="black", size=1.2, width = 0.1) +
+  ylim(-0.85,1.10)+
+  labs(x = "Dispersal Status",
+       y = "Residual TRIG (mmol/l)") +
+  scale_x_discrete(labels=c("disperser" = "Disperser", "non-disperser" = "Site-Faithful"))+
+  scale_fill_manual(values=c("darkslategray4", "darkslategray3")) +
+  theme_classic() +
+  theme(axis.text.x = element_text(colour = "black", size = 11, face = "plain"), 
+        axis.text.y = element_text(colour = "black", size = 11, face = "plain"),
+        axis.title.x = element_text(colour = "black", size=12, face = "plain"),
+        axis.title.y = element_text(colour = "black", size=12, face = "plain"),
+        legend.position = "none"
+        )
+
+plot_prediction_v_01
+
+```
